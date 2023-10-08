@@ -26,6 +26,8 @@ func SolveHCaptcha(data SolverData) Result {
 		url = CapmonsterBaseURL + "/createTask" // gonna finish this implementation soon aswell as 2capthca.
 	}
 
+	fmt.Print(url)
+
 	if data.Proxy == "" {
 		task = "HCaptchaTaskProxyLess"
 	} else {
