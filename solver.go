@@ -148,7 +148,7 @@ func SolveHCaptcha(data SolverData) (Result, error) {
 					CaptchaResponse: res.CapResp,
 				}, nil
 			case "failed":
-				return Result{}, nil
+				return Result{}, fmt.Errorf("")
 			}
 
 			time.Sleep(5 * time.Second)
