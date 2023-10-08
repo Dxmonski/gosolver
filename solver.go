@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -23,7 +24,9 @@ func SolveHCaptcha(data SolverData) Result {
 	case "capsolver":
 		url = CapsolverBaseURL + "/createTask"
 	case "capmonster":
-		url = CapmonsterBaseURL + "/createTask" // gonna finish this implementation soon aswell as 2capthca.
+		url = CapmonsterBaseURL + "/createTask"
+	case "2captcha":
+		// implemented soon aswell as more services perhaps.
 	}
 
 	if data.Proxy == "" {
@@ -32,36 +35,55 @@ func SolveHCaptcha(data SolverData) Result {
 		task = "HCaptchaTurboTask"
 	}
 
-	payload := TaskPayload{
-		ClientKey: data.ClientKey,
-		Task: HCaptchaTask{
-			Type:        task,
-			WebsiteURL:  data.WebURL,
-			WebsiteKey:  data.SiteKey,
-			IsInvisible: true,
-			EnterprisePayload: struct {
-				Rqdata string `json:"rqdata"`
-			}{Rqdata: ""},
-			Proxy:     "",
-			UserAgent: "",
-		},
-	}
+	var payload interface{}
 
-	if data.SiteKey == "" {
-		fmt.Printf("[GoSolver] - a website key is required with the context.\n")
-		return Result{}
-	}
+	switch Service {
+	case "capsolver":
+		taskPayload := TaskPayload{
+			ClientKey: data.ClientKey,
+			Task: HCaptchaTask{
+				Type:        task,
+				WebsiteURL:  data.WebURL,
+				WebsiteKey:  data.SiteKey,
+				IsInvisible: true,
+				EnterprisePayload: struct {
+					Rqdata string `json:"rqdata"`
+				}{Rqdata: ""},
+				Proxy:     "",
+				UserAgent: "",
+			},
+		}
 
-	if data.UA != "" {
-		payload.Task.UserAgent = data.UA
-	}
+		if data.SiteKey == "" {
+			fmt.Printf("[GoSolver] - Please pass a website key with the context.\n")
+			return Result{}
+		}
 
-	if data.Proxy != "" {
-		payload.Task.Proxy = data.Proxy
-	}
+		if data.Proxy != "" {
+			taskPayload.Task.Proxy = data.Proxy
+		}
 
-	if data.RQData != "" {
-		payload.Task.EnterprisePayload.Rqdata = data.RQData
+		if data.UA != "" {
+			taskPayload.Task.UserAgent = data.UA
+		}
+
+		if data.RQData != "" {
+			taskPayload.Task.EnterprisePayload.Rqdata = data.RQData
+		}
+
+		payload = &taskPayload
+
+	case "capmonster":
+		capmonsterPayload := Capmonster{
+			Key: data.ClientKey,
+			Task: CapmonsterTask{
+				Type:       "HCaptchaTaskProxyless", // Hot :Os
+				WebsiteURL: data.WebURL,
+				WebsiteKey: data.SiteKey,
+			},
+		}
+
+		payload = &capmonsterPayload
 	}
 
 	p, err := json.Marshal(payload)
@@ -96,26 +118,20 @@ func SolveHCaptcha(data SolverData) Result {
 		return Result{}
 	}
 
-	var response Created
+	response, err := unmarshalResponse(body)
 
-	if err := json.Unmarshal(body, &response); err != nil {
-		fmt.Printf("[GoSolver] - Failed to unmarshal event: %s\n", err)
-		return Result{}
-	}
-
-	if response.ErrorID != 0 {
+	if response.GetErrorID() != 0 {
 		if err := ProcessError(body); err != nil {
 			fmt.Printf("[GoSolver] - Unknown error: %s\n", err)
 			return Result{}
 		}
 	}
 
-	if response.TaskID != "" && response.ErrorID == 0 {
+	if taskID := response.GetTaskID(); taskID != "" && response.GetErrorID() == 0 {
 		for {
-			res, err := ProcessTask(TaskResult{
-				Key:    data.ClientKey,
-				TaskID: response.TaskID,
-			})
+			res, _ := ProcessTask(TaskResult{
+				Key: data.ClientKey,
+			}, response.GetTaskID())
 
 			switch res.CapStatus {
 			case "ready":
@@ -125,34 +141,59 @@ func SolveHCaptcha(data SolverData) Result {
 					CaptchaResponse: res.CapResp,
 				}
 			case "failed":
-				fmt.Printf("[GoSolver] - Failed to solve captcha: %s\n", err)
 				return Result{}
 			}
 
-			time.Sleep(3 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 	}
 
 	return Result{}
 }
 
-func ProcessTask(rq TaskResult) (Context, error) {
+func unmarshalResponse(body []byte) (TaskResponse, error) {
+	response := TaskResponse(nil)
+	if Service == "capsolver" {
+		var created CreatedCapS
+		response = &created
+	} else if Service == "capmonster" {
+		var created CreatedCapM
+		response = &created
+	}
+
+	if err := json.Unmarshal(body, response); err != nil {
+		fmt.Printf("[GoSolver] - Failed to unmarshal event: %s\n", err)
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func ProcessTask(rq TaskResult, taskid interface{}) (Context, error) {
 	url := ""
 
 	switch Service {
 	case "capsolver":
 		url = CapsolverBaseURL + "/getTaskResult"
 	case "capmonster":
-		url = CapmonsterBaseURL + "/getTaskResult "
+		url = CapmonsterBaseURL + "/getTaskResult"
 	}
 
-	payload, err := json.Marshal(rq)
+	payload := struct {
+		ClientKey string      `json:"clientKey"`
+		TaskID    interface{} `json:"taskId"`
+	}{
+		ClientKey: rq.Key,
+		TaskID:    taskid,
+	}
+
+	pl, err := json.Marshal(payload)
 
 	if err != nil {
 		return Context{}, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(pl))
 
 	if err != nil {
 		return Context{}, err
@@ -174,17 +215,36 @@ func ProcessTask(rq TaskResult) (Context, error) {
 		return Context{}, err
 	}
 
-	var r Finished
+	if Service == "capsolver" {
+		var r FinishedTaskCapSolver
 
-	if err := json.Unmarshal(body, &r); err != nil {
-		return Context{}, err
+		if err := json.Unmarshal(body, &r); err != nil {
+			return Context{}, err
+		}
+
+		// Captcha solved.
+		return Context{
+			CapKey:    r.Solution.CaptchaKey,
+			CapResp:   r.Solution.CaptchaResp,
+			CapStatus: r.Status,
+		}, nil
+
+	} else if Service == "capmonster" {
+		var r FinishedTaskCapMonster
+
+		if err := json.Unmarshal(body, &r); err != nil {
+			return Context{}, err
+		}
+
+		// Captcha solved.
+		return Context{
+			CapKey:    r.Sol.RespKey,
+			CapResp:   r.Sol.GRecaptchaResponse,
+			CapStatus: r.Status,
+		}, nil
 	}
 
-	return Context{
-		CapKey:    r.Solution.CaptchaKey,
-		CapResp:   r.Solution.CaptchaResp,
-		CapStatus: r.Status,
-	}, nil
+	return Context{}, err
 }
 
 func ProcessError(resp []byte) error {
@@ -256,4 +316,42 @@ func ProcessError(resp []byte) error {
 	fmt.Printf("[GoSolver] - Failed to solve captcha: %s\n", errorMessage)
 
 	return nil
+}
+
+func FormatProxyInput(proxy string) string {
+	if !strings.Contains(proxy, "@") {
+		fmt.Print("[GoSolver -> ProxyFormatter] - Proxy format: username:password@host:port")
+		return ""
+	}
+
+	if !strings.Contains(proxy, "http://") {
+		proxy = "http://" + proxy
+	}
+
+	pr, err := url.Parse(proxy)
+
+	if err != nil {
+		fmt.Printf("Failed to format proxy: %s\n", err)
+		return ""
+	}
+
+	var Proxy string
+
+	password, _ := pr.User.Password()
+
+	if len(password) < len(pr.User.Username()) {
+		Proxy = password + ":" + pr.User.Username()
+	} else {
+		Proxy = pr.User.Username() + ":" + password
+	}
+
+	Proxy += "@" + pr.Host
+
+	if pr.Port() != "" {
+		if !strings.Contains(pr.Host, ":"+pr.Port()) {
+			Proxy += ":" + pr.Port()
+		}
+	}
+
+	return "http://" + Proxy
 }
