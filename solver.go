@@ -3,6 +3,7 @@ package gosolver
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,11 +15,11 @@ import (
 var Client = &http.Client{}
 var Service string
 
-func SolveHCaptcha(data SolverData) Result {
+func SolveHCaptcha(data SolverData) (Result, error) {
 	url := ""
 	task := ""
 
-	Service = strings.ToLower(data.Service)
+	Service := strings.ToLower(data.Service)
 
 	switch Service {
 	case "capsolver":
@@ -26,7 +27,9 @@ func SolveHCaptcha(data SolverData) Result {
 	case "capmonster":
 		url = CapmonsterBaseURL + "/createTask"
 	case "2captcha":
-		// implemented soon aswell as more services perhaps.
+		// implemented soon as well as more services perhaps.
+	default:
+		return Result{}, fmt.Errorf("unsupported service: %s", data.Service)
 	}
 
 	if data.Proxy == "" {
@@ -55,8 +58,7 @@ func SolveHCaptcha(data SolverData) Result {
 		}
 
 		if data.SiteKey == "" {
-			fmt.Printf("[GoSolver] - Please pass a website key with the context.\n")
-			return Result{}
+			return Result{}, errors.New("[GoSolver] - Please pass a website key with the context.")
 		}
 
 		if data.Proxy != "" {
@@ -77,27 +79,27 @@ func SolveHCaptcha(data SolverData) Result {
 		capmonsterPayload := Capmonster{
 			Key: data.ClientKey,
 			Task: CapmonsterTask{
-				Type:       "HCaptchaTaskProxyless", // Hot :Os
+				Type:       "HCaptchaTaskProxyless",
 				WebsiteURL: data.WebURL,
 				WebsiteKey: data.SiteKey,
 			},
 		}
 
 		payload = &capmonsterPayload
+	default:
+		return Result{}, fmt.Errorf("unsupported service: %s", data.Service)
 	}
 
 	p, err := json.Marshal(payload)
 
 	if err != nil {
-		fmt.Printf("[GoSolver] - Error while marshaling payload: %s\n", err)
-		return Result{}
+		return Result{}, fmt.Errorf("[GoSolver] - Error while marshaling payload: %s", err)
 	}
 
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(p))
 
 	if err != nil {
-		fmt.Printf("[GoSolver] - Failed to create new HTTP request: %s\n", err)
-		return Result{}
+		return Result{}, fmt.Errorf("[GoSolver] - Failed to create new HTTP request: %s", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -105,8 +107,7 @@ func SolveHCaptcha(data SolverData) Result {
 	resp, err := Client.Do(req)
 
 	if err != nil {
-		fmt.Printf("[GoSolver] - Failed to perform client request: %s\n", err)
-		return Result{}
+		return Result{}, fmt.Errorf("[GoSolver] - Failed to perform client request: %s", err)
 	}
 
 	defer resp.Body.Close()
@@ -114,24 +115,30 @@ func SolveHCaptcha(data SolverData) Result {
 	body, err := io.ReadAll(resp.Body)
 
 	if err != nil {
-		fmt.Printf("[GoSolver] - Failed to read response body: %s\n", err)
-		return Result{}
+		return Result{}, fmt.Errorf("[GoSolver] - Failed to read response body: %s", err)
 	}
 
 	response, err := unmarshalResponse(body)
 
+	if err != nil {
+		return Result{}, fmt.Errorf("[GoSolver] - Failed to unmarshal response: %s", err)
+	}
+
 	if response.GetErrorID() != 0 {
 		if err := ProcessError(body); err != nil {
-			fmt.Printf("[GoSolver] - Unknown error: %s\n", err)
-			return Result{}
+			return Result{}, fmt.Errorf("[GoSolver] - Unknown error: %s", err)
 		}
 	}
 
 	if taskID := response.GetTaskID(); taskID != "" && response.GetErrorID() == 0 {
 		for {
-			res, _ := ProcessTask(TaskResult{
+			res, err := ProcessTask(TaskResult{
 				Key: data.ClientKey,
 			}, response.GetTaskID())
+
+			if err != nil {
+				return Result{}, err
+			}
 
 			switch res.CapStatus {
 			case "ready":
@@ -139,16 +146,16 @@ func SolveHCaptcha(data SolverData) Result {
 				return Result{
 					Captchakey:      res.CapKey,
 					CaptchaResponse: res.CapResp,
-				}
+				}, nil
 			case "failed":
-				return Result{}
+				return Result{}, nil
 			}
 
 			time.Sleep(5 * time.Second)
 		}
 	}
 
-	return Result{}
+	return Result{}, nil
 }
 
 func unmarshalResponse(body []byte) (TaskResponse, error) {
