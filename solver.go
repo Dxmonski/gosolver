@@ -142,6 +142,7 @@ func SolveHCaptcha(data SolverData) (Result, error) {
 
 			switch res.CapStatus {
 			case "ready":
+				// Captcha has been solved successfully.
 				fmt.Printf("[GoSolver] - Successfully solved captcha: %s\n", res.CapResp[:20]+"...")
 				return Result{
 					Captchakey:      res.CapKey,
@@ -228,8 +229,7 @@ func ProcessTask(rq TaskResult, taskid interface{}) (Context, error) {
 		if err := json.Unmarshal(body, &r); err != nil {
 			return Context{}, err
 		}
-
-		// Captcha solved.
+		
 		return Context{
 			CapKey:    r.Solution.CaptchaKey,
 			CapResp:   r.Solution.CaptchaResp,
@@ -243,7 +243,6 @@ func ProcessTask(rq TaskResult, taskid interface{}) (Context, error) {
 			return Context{}, err
 		}
 
-		// Captcha solved.
 		return Context{
 			CapKey:    r.Sol.RespKey,
 			CapResp:   r.Sol.GRecaptchaResponse,
