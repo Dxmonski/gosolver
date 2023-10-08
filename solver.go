@@ -26,8 +26,6 @@ func SolveHCaptcha(data SolverData) Result {
 		url = CapmonsterBaseURL + "/createTask" // gonna finish this implementation soon aswell as 2capthca.
 	}
 
-	fmt.Print(url)
-
 	if data.Proxy == "" {
 		task = "HCaptchaTaskProxyLess"
 	} else {
@@ -50,7 +48,7 @@ func SolveHCaptcha(data SolverData) Result {
 	}
 
 	if data.SiteKey == "" {
-		fmt.Printf("[GoSolver] - Please pass a website key with the context.\n")
+		fmt.Printf("[GoSolver] - a website key is required with the context.\n")
 		return Result{}
 	}
 
