@@ -17,6 +17,17 @@ type SolverData struct {
 	RQToken   string
 }
 
+type CapmonsterTask struct {
+	Type       string `json:"type"`
+	WebsiteURL string `json:"websiteURL"`
+	WebsiteKey string `json:"websiteKey"`
+}
+
+type Capmonster struct {
+	Key  string         `json:"clientKey"`
+	Task CapmonsterTask `json:"task"`
+}
+
 type HCaptchaTask struct {
 	Type              string `json:"type"`
 	WebsiteURL        string `json:"websiteURL"`
@@ -35,10 +46,36 @@ type TaskPayload struct {
 	Task      HCaptchaTask `json:"task"`
 }
 
-type Created struct {
+type TaskResponse interface {
+	GetErrorID() int
+	GetTaskID() interface{}
+}
+
+type CreatedCapS struct {
 	ErrorID int    `json:"errorId"`
 	TaskID  string `json:"taskId"`
 	Status  string `json:"status"`
+}
+
+func (c *CreatedCapS) GetErrorID() int {
+	return c.ErrorID
+}
+
+func (c *CreatedCapS) GetTaskID() interface{} {
+	return c.TaskID
+}
+
+type CreatedCapM struct {
+	ErrorID int `json:"errorId"`
+	TaskID  int `json:"taskId"`
+}
+
+func (c *CreatedCapM) GetErrorID() int {
+	return c.ErrorID
+}
+
+func (c *CreatedCapM) GetTaskID() interface{} {
+	return c.TaskID
 }
 
 type Error struct {
@@ -52,7 +89,7 @@ type TaskResult struct {
 	TaskID string
 }
 
-type Finished struct {
+type FinishedTaskCapSolver struct {
 	Err            int    `json:"errorId"`
 	ErrCode        int    `json:"errorCode"`
 	ErrDescription string `json:"errorDescription"`
@@ -72,4 +109,14 @@ type Context struct {
 type Result struct {
 	Captchakey      string
 	CaptchaResponse string
+}
+
+type FinishedTaskCapMonster struct {
+	Err    int    `json:"errorId"`
+	Status string `json:"status"`
+	Sol    struct {
+		GRecaptchaResponse string `json:"gRecaptchaResponse"`
+		RespKey            string `json:"respKey"`
+		UserAgent          string `json:"userAgent"`
+	} `json:"solution"`
 }
